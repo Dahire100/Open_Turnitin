@@ -247,7 +247,7 @@ def export_endpoint(req: ExportRequest):
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {fmt}")
 
-# Mount static React build if it exists
+# Mount static React build if it exists, otherwise provide API root
 DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
 if os.path.exists(DIST_DIR):
     app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
@@ -258,6 +258,16 @@ if os.path.exists(DIST_DIR):
         if os.path.exists(index_file):
             return FileResponse(index_file)
         raise HTTPException(status_code=404, detail="Frontend build not found.")
+else:
+    @app.get("/")
+    def api_root():
+        return {
+            "status": "online",
+            "service": "Open Turnitin Core Dual Engine API",
+            "author": "Devendra Ahire",
+            "docs": "/docs",
+            "health": "/api/health"
+        }
 
 if __name__ == "__main__":
     import uvicorn
