@@ -21,6 +21,8 @@ import {
   Cpu
 } from 'lucide-react';
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+
 function CircularGauge({ value, color = '#10b981', size = 78, strokeWidth = 7 }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -99,7 +101,7 @@ export default function App() {
     formData.append('file', file);
 
     try {
-      const res = await fetch('/api/upload', {
+      const res = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData
       });
@@ -129,7 +131,7 @@ export default function App() {
 
     try {
       setIsChecking(true);
-      const res = await fetch('/api/check', {
+      const res = await fetch(`${API_BASE}/api/check`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: checkInput })
@@ -153,7 +155,7 @@ export default function App() {
 
     try {
       setIsRemoving(true);
-      const res = await fetch('/api/humanize', {
+      const res = await fetch(`${API_BASE}/api/humanize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -186,7 +188,7 @@ export default function App() {
   const handleDownloadReviewPDF = async () => {
     if (!checkInput.trim()) return;
     try {
-      const res = await fetch('/api/report/turnitin-pdf', {
+      const res = await fetch(`${API_BASE}/api/report/turnitin-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -213,7 +215,7 @@ export default function App() {
     const textToExport = removerOutput || checkInput;
     if (!textToExport.trim()) return;
     try {
-      const res = await fetch('/api/report/cleared-pdf', {
+      const res = await fetch(`${API_BASE}/api/report/cleared-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -241,7 +243,7 @@ export default function App() {
   const handleDownloadSimilarityDocx = async () => {
     if (!checkInput.trim()) return;
     try {
-      const res = await fetch('/api/report/similarity-docx', {
+      const res = await fetch(`${API_BASE}/api/report/similarity-docx`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: checkInput, filename: checkFileName || 'Similarity_Review', check_result: checkResult })
@@ -263,7 +265,7 @@ export default function App() {
     const textToExport = removerOutput || checkInput;
     if (!textToExport.trim()) return;
     try {
-      const res = await fetch('/api/report/cleared-docx', {
+      const res = await fetch(`${API_BASE}/api/report/cleared-docx`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -291,7 +293,7 @@ export default function App() {
   const handleExport = async (format) => {
     if (!removerOutput) return;
     try {
-      const res = await fetch('/api/export', {
+      const res = await fetch(`${API_BASE}/api/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
