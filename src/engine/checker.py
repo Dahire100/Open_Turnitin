@@ -137,6 +137,16 @@ def evaluate_sentence_ai(sentence: str) -> Tuple[float, List[str]]:
 
     return min(99.0, round(ai_prob, 1)), reasons
 
+def merge_spans(spans: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """Merge overlapping character spans so each matched word is counted once."""
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return merged
+
 def evaluate_sentence_plagiarism(sentence: str) -> Tuple[float, bool, Dict[str, Any]]:
     """
     Evaluates whether a sentence contains high-risk n-grams or common published strings.
@@ -144,29 +154,27 @@ def evaluate_sentence_plagiarism(sentence: str) -> Tuple[float, bool, Dict[str, 
     s_low = sentence.lower()
     match_count = 0
     detected_phrases = []
+    detected_spans = []
 
     for shingle in COMMON_PLAGIARISM_SHINGLES:
-        if re.search(shingle, s_low):
+        matches = list(re.finditer(shingle, sentence, re.I))
+        if matches:
             match_count += 1
             detected_phrases.append(shingle.replace(r'\b', '').strip())
+            detected_spans.extend((match.start(), match.end()) for match in matches)
 
-    # Reference or Citation lines automatically match published sources
+    # Bibliography lines cannot be verified by this local phrase-only scan.
     is_reference = bool(re.search(r'^\s*\[\s*\d+\s*\]|^\s*\d+\.\s+[A-Z]|\b(19|20)\d{2}\s*;\s*\d+|doi:|Zenodo', sentence, re.I))
-
     if is_reference:
-        score = 88.0 + (len(sentence) % 10)
-        source_idx = int(hashlib.md5(sentence.encode('utf-8')).hexdigest(), 16) % len(ACADEMIC_SOURCE_ARCHETYPES)
-        return score, True, {
-            "source": ACADEMIC_SOURCE_ARCHETYPES[source_idx],
-            "phrases": ["Exact Published Bibliography / Citation Record"]
-        }
+        return 0.0, False, {}
 
     if match_count > 0:
         score = min(95.0, 35.0 + match_count * 25.0)
         source_idx = int(hashlib.md5(sentence.encode('utf-8')).hexdigest(), 16) % len(ACADEMIC_SOURCE_ARCHETYPES)
         return score, True, {
             "source": ACADEMIC_SOURCE_ARCHETYPES[source_idx],
-            "phrases": detected_phrases
+            "phrases": detected_phrases,
+            "spans": merge_spans(detected_spans)
         }
 
     return 0.0, False, {}
@@ -212,6 +220,15 @@ def run_comprehensive_check(text: str) -> Dict[str, Any]:
         w_count = len(tokenize_words(s_text))
         ai_prob, ai_reasons = evaluate_sentence_ai(s_text)
         plag_score, is_plag, plag_info = evaluate_sentence_plagiarism(s_text)
+        paragraph_start = text.rfind("\n\n", 0, start_pos) + 2
+        paragraph_end = text.find("\n\n", start_pos)
+        if paragraph_end < 0:
+            paragraph_end = len(text)
+        paragraph_text = text[paragraph_start:paragraph_end]
+        is_reference_paragraph = bool(re.match(r"^\s*(?:\[\s*\d+\s*\]|\d+\.\s+[A-Z]|references\b|bibliography\b)", paragraph_text, re.I))
+        if is_reference_paragraph:
+            ai_prob, ai_reasons = 5.0, []
+            plag_score, is_plag, plag_info = 0.0, False, {}
 
         # Decide classification for highlight
         seg_type = "clean"
@@ -222,16 +239,22 @@ def run_comprehensive_check(text: str) -> Dict[str, Any]:
             seg_type = "plagiarism"
             highlight_color = plag_info["source"]["color"]
             source_name = plag_info["source"]["name"]
-            plagiarized_word_count += w_count
+            phrase_spans = plag_info.get("spans", [])
+            matched_words = min(w_count, sum(len(tokenize_words(s_text[a:b])) for a, b in phrase_spans))
+            plagiarized_word_count += matched_words
 
-            # Track source match stats
-            source_match_tallies[source_name] = source_match_tallies.get(source_name, 0) + w_count
+            # Track only words covered by a local phrase rule.
+            source_match_tallies[source_name] = source_match_tallies.get(source_name, 0) + matched_words
             source_metadata_map[source_name] = plag_info["source"]
         elif ai_prob >= 40.0:
             seg_type = "ai"
             highlight_color = "#a855f7" # Purple for AI
             ai_sentence_count += 1
 
+        sentence_start = text.find(s_text, start_pos, end_pos)
+        if sentence_start < 0:
+            sentence_start = start_pos
+        global_matches = [[sentence_start + a, sentence_start + b] for a, b in plag_info.get("spans", [])] if is_plag else []
         highlighted_segments.append({
             "id": idx + 1,
             "text": s_text,
@@ -242,7 +265,8 @@ def run_comprehensive_check(text: str) -> Dict[str, Any]:
             "ai_prob": ai_prob,
             "similarity_score": plag_score if is_plag else 0.0,
             "source_name": source_name,
-            "reasons": ai_reasons if seg_type == "ai" else (plag_info.get("phrases", []) if is_plag else [])
+            "reasons": ai_reasons if seg_type == "ai" else (plag_info.get("phrases", []) if is_plag else []),
+            "matched_spans": global_matches
         })
 
         sentence_breakdown.append({
@@ -271,6 +295,8 @@ def run_comprehensive_check(text: str) -> Dict[str, Any]:
     # Compile matched sources breakdown with relative percentages
     matched_sources = []
     for s_name, tally in source_match_tallies.items():
+        if tally <= 0:
+            continue
         pct = round((tally / max(1, total_words)) * 100.0, 1)
         meta = source_metadata_map[s_name]
         matched_sources.append({

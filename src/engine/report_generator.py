@@ -1,7 +1,6 @@
 """
-Turnitout Core - Turnitin-Style Official Report Generator
-Generates PDF and Word (.docx) similarity and originality reports
-matching the Turnitin Originality & AI Detection Report design.
+Turnitout report generators.
+Creates local heuristic similarity review summaries in PDF and Word formats.
 """
 import io
 import datetime
@@ -22,194 +21,155 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 
+def _annotated_text_markup(original_text: str, highlighted: List[Dict[str, Any]]) -> str:
+    """Render exact source spans without injecting sentence IDs into citations."""
+    parts = []
+    cursor = 0
+    palette = {"#ef4444": "#8f3940", "#f97316": "#8e4d22", "#eab308": "#785f14", "#ec4899": "#8b3d68", "#8b5cf6": "#5b3a90", "#06b6d4": "#176d7c", "#a855f7": "#704599"}
+    for seg in sorted(highlighted, key=lambda item: item.get("start", 0)):
+        start = max(cursor, int(seg.get("start", cursor)))
+        end = min(len(original_text), max(start, int(seg.get("end", start))))
+        if start > cursor:
+            plain = html.escape(original_text[cursor:start]).replace("\n", "<br/>")
+            parts.append(plain)
+        if end <= start:
+            continue
+        kind = seg.get("type")
+        if kind == "plagiarism" and seg.get("matched_spans"):
+            local_cursor = start
+            for match_start, match_end in seg["matched_spans"]:
+                match_start = max(local_cursor, int(match_start))
+                match_end = min(end, int(match_end))
+                if match_end <= match_start:
+                    continue
+                parts.append(html.escape(original_text[local_cursor:match_start]).replace("\n", "<br/>"))
+                color = str(seg.get("color") or "#ef4444").lower()
+                ink = palette.get(color, "#8f3940")
+                phrase = html.escape(original_text[match_start:match_end]).replace("\n", "<br/>")
+                parts.append(f'<font backcolor="{color}" color="{ink}"><b>{phrase}</b></font>')
+                local_cursor = match_end
+            parts.append(html.escape(original_text[local_cursor:end]).replace("\n", "<br/>"))
+        else:
+            raw = html.escape(original_text[start:end]).replace("\n", "<br/>")
+            if kind == "ai":
+                color = str(seg.get("color") or "#a855f7").lower()
+                parts.append(f'<font backcolor="{color}" color="{palette.get(color, "#704599")}">{raw}</font>')
+            else:
+                parts.append(raw)
+        cursor = end
+    if cursor < len(original_text):
+        parts.append(html.escape(original_text[cursor:]).replace("\n", "<br/>"))
+    return "".join(parts)
+
+
+def _source_group_index(sources: List[Dict[str, Any]], color: str) -> int:
+    for index, source in enumerate(sources, 1):
+        if str(source.get("color", "")).lower() == str(color or "").lower():
+            return index
+    return 1
+
+
 def generate_turnitin_pdf_report(
     check_result: Dict[str, Any],
     original_text: str,
     doc_title: str = "Submitted_Document"
 ) -> bytes:
-    """
-    Generates an authentic Turnitin-style Originality & Similarity PDF report.
-    """
+    """Generate a polished local similarity review PDF (not a Turnitin report)."""
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=40,
-        bottomMargin=40
-    )
-
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=38, bottomMargin=48)
     styles = getSampleStyleSheet()
-
-    # Custom styles
-    brand_blue = colors.HexColor("#002f6c")
-    brand_teal = colors.HexColor("#0284c7")
-    accent_red = colors.HexColor("#dc2626")
-    accent_green = colors.HexColor("#16a34a")
-    text_dark = colors.HexColor("#1e293b")
-    bg_light = colors.HexColor("#f8fafc")
-
+    navy = colors.HexColor("#17365b")
+    blue = colors.HexColor("#315f9e")
+    ink = colors.HexColor("#26384d")
+    muted = colors.HexColor("#68788c")
+    line = colors.HexColor("#d8e1ec")
+    pale = colors.HexColor("#f4f7fb")
     sim_score = check_result.get("overall_similarity", 0.0)
-    ai_score = check_result.get("overall_ai_score", 0.0)
+    cue_score = check_result.get("overall_ai_score", 0.0)
     stats = check_result.get("document_stats", {})
     sources = check_result.get("matched_sources", [])
     highlighted = check_result.get("highlighted_segments", [])
-
-    sim_color = accent_red if sim_score > 24 else (colors.HexColor("#eab308") if sim_score > 10 else accent_green)
-    ai_color = colors.HexColor("#a855f7") if ai_score > 20 else accent_green
-
+    body = ParagraphStyle("ReviewBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=9.5, leading=15, textColor=ink, spaceAfter=2)
+    small = ParagraphStyle("ReviewSmall", parent=styles["BodyText"], fontSize=8, leading=11, textColor=muted)
+    h2 = ParagraphStyle("ReviewHeading", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=navy, spaceBefore=8, spaceAfter=7)
+    cell = ParagraphStyle("ReviewCell", parent=styles["BodyText"], fontSize=8, leading=10, textColor=ink)
     story = []
-
-    # 1. Header Banner
-    header_data = [
-        [
-            Paragraph('<font color="#ffffff" size="18"><b>turnitout</b></font> <font color="#93c5fd" size="12">| ORIGINALITY REPORT</font>', styles['Normal']),
-            Paragraph(f'<font color="#ffffff" size="10">OFFICIAL INTEGRITY AUDIT</font>', ParagraphStyle('HRight', parent=styles['Normal'], alignment=TA_RIGHT))
-        ]
-    ]
-    header_table = Table(header_data, colWidths=[350, 180])
-    header_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), brand_blue),
-        ('PADDING', (0, 0), (-1, -1), 12),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-    ]))
-    story.append(header_table)
-    story.append(Spacer(1, 15))
-
-    # 2. Document Metadata Box
-    sub_id = "trn:oid:::" + hashlib.md5((doc_title + original_text[:100]).encode('utf-8')).hexdigest()[:12]
-    now_str = datetime.datetime.now().strftime("%d-%b-%Y %I:%M %p")
-
-    meta_content = [
-        [
-            Paragraph(f"<b>Document Title:</b> {doc_title}", styles['Normal']),
-            Paragraph(f"<b>Submission ID:</b> {sub_id}", styles['Normal'])
-        ],
-        [
-            Paragraph(f"<b>Submission Date:</b> {now_str}", styles['Normal']),
-            Paragraph(f"<b>Word Count:</b> {stats.get('words', len(original_text.split()))}", styles['Normal'])
-        ],
-        [
-            Paragraph(f"<b>Character Count:</b> {stats.get('characters', len(original_text))}", styles['Normal']),
-            Paragraph(f"<b>Burstiness Index:</b> {stats.get('burstiness', 0.5)}", styles['Normal'])
-        ]
-    ]
-    meta_table = Table(meta_content, colWidths=[270, 260])
-    meta_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), bg_light),
-        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
-        ('PADDING', (0, 0), (-1, -1), 8),
-        ('FONTSIZE', (0, 0), (-1, -1), 9)
-    ]))
-    story.append(meta_table)
-    story.append(Spacer(1, 15))
-
-    # 3. Overall Similarity & AI Badges
-    badge_data = [
-        [
-            Paragraph(f'<font size="24" color="{sim_color.hexval()}"><b>{sim_score}%</b></font><br/><font size="10" color="#475569"><b>SIMILARITY INDEX</b></font>', ParagraphStyle('C1', parent=styles['Normal'], alignment=TA_CENTER)),
-            Paragraph(f'<font size="24" color="{ai_color.hexval()}"><b>{ai_score}%</b></font><br/><font size="10" color="#475569"><b>AI DETECTION PROBABILITY</b></font>', ParagraphStyle('C2', parent=styles['Normal'], alignment=TA_CENTER)),
-            Paragraph(f'<font size="12" color="#0369a1"><b>ORIGINALITY STATUS</b></font><br/><font size="10" color="{sim_color.hexval()}"><b>{"HIGH SIMILARITY (ACTION REQUIRED)" if sim_score > 20 else ("MODERATE SIMILARITY" if sim_score > 5 else "CLEARED / 100% ORIGINAL")}</b></font>', ParagraphStyle('C3', parent=styles['Normal'], alignment=TA_CENTER))
-        ]
-    ]
-    badge_table = Table(badge_data, colWidths=[175, 175, 180])
-    badge_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#f1f5f9")),
-        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#94a3b8")),
-        ('INNERGRID', (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
-        ('PADDING', (0, 0), (-1, -1), 10),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-    ]))
-    story.append(badge_table)
-    story.append(Spacer(1, 20))
-
-    # 4. Primary Sources Breakdown
-    story.append(Paragraph('<b>PRIMARY MATCHED SOURCES</b>', ParagraphStyle('H2', parent=styles['Heading2'], fontSize=12, textColor=brand_blue)))
-    story.append(Spacer(1, 5))
-
+    title = html.escape(doc_title)
+    header = Table([[Paragraph('<font color="#ffffff" size="15"><b>turnitout</b></font>  <font color="#c9d9ee" size="10">ACADEMIC WRITING REVIEW</font>', styles["Normal"]), Paragraph('<font color="#ffffff" size="9"><b>SIMILARITY SUMMARY</b></font>', ParagraphStyle("ReviewHeaderRight", parent=styles["Normal"], alignment=TA_RIGHT))]], colWidths=[340, 192], rowHeights=[40])
+    header.setStyle(TableStyle([("BACKGROUND", (0,0),(-1,-1),navy),("LEFTPADDING",(0,0),(-1,-1),14),("RIGHTPADDING",(0,0),(-1,-1),14),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story += [header, Spacer(1, 13), Paragraph("Similarity review", ParagraphStyle("ReviewTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=19, leading=23, textColor=navy, spaceAfter=4)), Paragraph("A local heuristic scan of recurring phrases and writing-pattern cues. It does not query Turnitin or external repositories.", small), Spacer(1, 12)]
+    meta = [[Paragraph(f"<b>Document</b><br/>{title}", cell), Paragraph(f"<b>Words</b><br/>{stats.get('words', len(original_text.split()))}", cell)], [Paragraph(f"<b>Reviewed</b><br/>{datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')}", cell), Paragraph(f"<b>Characters</b><br/>{stats.get('characters', len(original_text))}", cell)]]
+    meta_table = Table(meta, colWidths=[360,172])
+    meta_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),pale),("BOX",(0,0),(-1,-1),.7,line),("INNERGRID",(0,0),(-1,-1),.5,line),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),10),("RIGHTPADDING",(0,0),(-1,-1),10),("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),8)]))
+    story += [meta_table, Spacer(1, 12)]
+    scores = [[Paragraph(f'<font color="#315f9e" size="22"><b>{sim_score}%</b></font><br/><font color="#52657d" size="8"><b>POTENTIAL PHRASE OVERLAP</b></font>', ParagraphStyle("ScoreA", parent=styles["Normal"], alignment=TA_CENTER, leading=27)), Paragraph(f'<font color="#79519c" size="22"><b>{cue_score}%</b></font><br/><font color="#52657d" size="8"><b>WRITING-PATTERN CUES</b></font>', ParagraphStyle("ScoreB", parent=styles["Normal"], alignment=TA_CENTER, leading=27))]]
+    score_table=Table(scores,colWidths=[266,266],rowHeights=[62]); score_table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.white),("BOX",(0,0),(-1,-1),.7,line),("INNERGRID",(0,0),(-1,-1),.7,line),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+    story += [score_table, Spacer(1, 5), Paragraph("These values are heuristic indicators for review, not a plagiarism verdict or an authorship determination.", small), Paragraph("Local pattern groups", h2)]
     if sources:
-        sources_rows = [
-            [
-                Paragraph('<b>#</b>', styles['Normal']),
-                Paragraph('<b>Source Name / Repository</b>', styles['Normal']),
-                Paragraph('<b>Database Category</b>', styles['Normal']),
-                Paragraph('<b>Similarity %</b>', styles['Normal'])
-            ]
-        ]
-        for i, src in enumerate(sources[:6], 1):
-            src_col = colors.HexColor(src.get("color", "#ef4444"))
-            sources_rows.append([
-                Paragraph(f'<font color="{src_col.hexval()}"><b>{i}</b></font>', styles['Normal']),
-                Paragraph(f'{src.get("name")}', styles['Normal']),
-                Paragraph(f'{src.get("category")}', styles['Normal']),
-                Paragraph(f'<b>{src.get("percentage")}%</b>', styles['Normal'])
-            ])
-        sources_table = Table(sources_rows, colWidths=[30, 250, 170, 80])
-        sources_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
-            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
-            ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#f1f5f9")),
-            ('PADDING', (0, 0), (-1, -1), 6),
-            ('FONTSIZE', (0, 0), (-1, -1), 8)
-        ]))
-        story.append(sources_table)
+        rows=[[Paragraph("<b>#</b>",cell),Paragraph("<b>Local phrase group</b>",cell),Paragraph("<b>Signal</b>",cell),Paragraph("<b>Text share</b>",cell)]]
+        for i, src in enumerate(sources[:6],1):
+            rows.append([Paragraph(f"<font color='{src.get('color','#315f9e')}'><b>{i}</b></font>",cell),Paragraph(f"Phrase group {i}",cell),Paragraph("Recurring phrase rule",cell),Paragraph(f"<b>{src.get('percentage',0)}%</b>",cell)])
+        table=Table(rows,colWidths=[28,208,190,106],repeatRows=1)
+        table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),pale),("BOX",(0,0),(-1,-1),.7,line),("INNERGRID",(0,0),(-1,-1),.45,line),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
+        story.append(table)
     else:
-        story.append(Paragraph('<font color="#16a34a">No overlapping sources detected in national and international databases.</font>', styles['Normal']))
-
-    story.append(Spacer(1, 20))
-
-    # 5. Document Text with Highlighted Annotations
-    story.append(Paragraph('<b>SUBMISSION TEXT & HIGHLIGHT ANALYSIS</b>', ParagraphStyle('H2', parent=styles['Heading2'], fontSize=12, textColor=brand_blue)))
-    story.append(Spacer(1, 8))
-
-    body_style = ParagraphStyle(
-        'DocBody',
-        parent=styles['Normal'],
-        fontSize=9.5,
-        leading=14,
-        textColor=text_dark,
-        alignment=TA_LEFT
-    )
-
-    # Render segments with inline background colors
-    if highlighted:
-        annotated_html = ""
-        for seg in highlighted:
-            seg_text = seg["text"].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-            if seg["type"] == "plagiarism":
-                annotated_html += f'<font backcolor="#fee2e2" color="#b91c1c"><b>[{seg["id"]}]</b> {seg_text}</font> '
-            elif seg["type"] == "ai":
-                annotated_html += f'<font backcolor="#f3e8ff" color="#7e22ce"><b>[{seg["id"]}]</b> {seg_text}</font> '
-            else:
-                annotated_html += f'{seg_text} '
-        story.append(Paragraph(annotated_html, body_style))
-    else:
-        safe_text = original_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        story.append(Paragraph(safe_text, body_style))
-
-    story.append(Spacer(1, 25))
-
-    # 6. Verification Footer / Disclaimer
-    disclaimer_style = ParagraphStyle(
-        'Disclaimer',
-        parent=styles['Normal'],
-        fontSize=7.5,
-        leading=10,
-        textColor=colors.HexColor("#64748b"),
-        alignment=TA_CENTER
-    )
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#cbd5e1"), spaceBefore=10, spaceAfter=10))
-    story.append(Paragraph(
-        "<b>Turnitout Academic Integrity Suite</b> &bull; Deterministic Zero-AI Humanization & Similarity Engine<br/>"
-        "This originality report is deterministic and verified against multi-cluster academic database protocols.",
-        disclaimer_style
-    ))
-
-    doc.build(story)
+        story.append(Paragraph("No local phrase rules were triggered. This does not establish that a document is original.", body))
+    story += [Paragraph("Highlighted text",h2), Paragraph("Only the phrase spans that triggered a local rule are shaded. Check surrounding context and citations before drawing conclusions.",small), Spacer(1,6), Paragraph(_annotated_text_markup(original_text,highlighted),body)]
+    def add_footer(canvas, _doc):
+        canvas.saveState(); canvas.setStrokeColor(line); canvas.line(40,34,572,34); canvas.setFont("Helvetica",7.5); canvas.setFillColor(muted); canvas.drawString(40,22,"Turnitout · Local heuristic review · Not affiliated with Turnitin"); canvas.drawRightString(572,22,f"Page {_doc.page}"); canvas.restoreState()
+    doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def generate_similarity_docx_report(check_result: Dict[str, Any], original_text: str, doc_title: str = "Submitted_Document") -> bytes:
+    """Generate an editable Word similarity review with source-span highlights."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    doc=Document(); section=doc.sections[0]; section.top_margin=Inches(.65); section.bottom_margin=Inches(.65); section.left_margin=Inches(.75); section.right_margin=Inches(.75)
+    title=doc.add_paragraph(); title.alignment=WD_ALIGN_PARAGRAPH.LEFT
+    run=title.add_run("turnitout  /  ACADEMIC WRITING REVIEW"); run.bold=True; run.font.size=Pt(10); run.font.color.rgb=RGBColor(49,95,158)
+    heading=doc.add_paragraph("Similarity review",style="Title"); heading.runs[0].font.color.rgb=RGBColor(0,0,0)
+    note=doc.add_paragraph("Local heuristic scan of recurring phrases and writing-pattern cues. This report does not query Turnitin or external repositories."); note.runs[0].font.size=Pt(9); note.runs[0].font.color.rgb=RGBColor(104,120,140)
+    doc.add_heading("Review summary",level=1)
+    metrics=doc.add_table(rows=2,cols=2); metrics.style="Light Shading Accent 1"; metrics.alignment=WD_TABLE_ALIGNMENT.CENTER
+    metrics.cell(0,0).text="Potential phrase overlap estimate"; metrics.cell(0,1).text="Writing-pattern cues"
+    metrics.cell(1,0).text=f"{check_result.get('overall_similarity',0)}%"; metrics.cell(1,1).text=f"{check_result.get('overall_ai_score',0)}%"
+    meta=doc.add_paragraph(f"Document: {doc_title}   |   Words: {check_result.get('document_stats',{}).get('words',len(original_text.split()))}   |   Reviewed: {datetime.datetime.now().strftime('%d %b %Y, %I:%M %p')}"); meta.runs[0].font.size=Pt(9)
+    doc.add_paragraph("Indicators are heuristic prompts for human review, not a plagiarism verdict or an authorship determination.")
+    doc.add_heading("Local phrase groups",level=1)
+    sources=check_result.get('matched_sources',[])
+    if sources:
+        t=doc.add_table(rows=1,cols=3);t.style="Light Shading Accent 1";t.alignment=WD_TABLE_ALIGNMENT.CENTER
+        for c,text in zip(t.rows[0].cells,["Group","Signal","Text share"]): c.text=text
+        for i,src in enumerate(sources[:6],1):
+            row=t.add_row().cells;row[0].text=f"Phrase group {i}";row[1].text="Recurring phrase rule";row[2].text=f"{src.get('percentage',0)}%"
+    else: doc.add_paragraph("No local phrase rules were triggered. This does not establish originality.")
+    doc.add_heading("Document text and highlights",level=1)
+    p=doc.add_paragraph(); palette={"#ef4444":"F8DFE0","#f97316":"FBE8D8","#eab308":"F7EDC9","#ec4899":"F6E0EB","#8b5cf6":"EDE5F7","#06b6d4":"DDEFF2","#a855f7":"EFE5F8"}
+    cursor=0
+    for seg in sorted(check_result.get('highlighted_segments',[]),key=lambda item:item.get('start',0)):
+        start=max(cursor,int(seg.get('start',cursor)));end=min(len(original_text),max(start,int(seg.get('end',start))))
+        if start>cursor:p.add_run(original_text[cursor:start])
+        if end<=start:continue
+        kind=seg.get('type');color=str(seg.get('color') or ('#a855f7' if kind=='ai' else '#ef4444')).lower()
+        if kind=='plagiarism' and seg.get('matched_spans'):
+            local_cursor=start
+            for match_start,match_end in seg['matched_spans']:
+                match_start=max(local_cursor,int(match_start));match_end=min(end,int(match_end))
+                if match_end<=match_start:continue
+                p.add_run(original_text[local_cursor:match_start])
+                run=p.add_run(original_text[match_start:match_end]);run.font.color.rgb=RGBColor(50,65,84);props=run._element.get_or_add_rPr();shd=OxmlElement('w:shd');shd.set(qn('w:fill'),palette.get(color,'F8DFE0'));props.append(shd)
+                local_cursor=match_end
+            p.add_run(original_text[local_cursor:end])
+        else:
+            run=p.add_run(original_text[start:end])
+            if kind=='ai':run.font.color.rgb=RGBColor(50,65,84);props=run._element.get_or_add_rPr();shd=OxmlElement('w:shd');shd.set(qn('w:fill'),palette.get(color,'EFE5F8'));props.append(shd)
+        cursor=end
+    if cursor<len(original_text):p.add_run(original_text[cursor:])
+    doc.add_paragraph("Color identifies local phrase-pattern flags; review sources, quotations, and citations in context.")
+    footer=section.footer.paragraphs[0];footer.alignment=WD_ALIGN_PARAGRAPH.CENTER;fr=footer.add_run("Turnitout · Local heuristic review · Not affiliated with Turnitin");fr.font.size=Pt(8);fr.font.color.rgb=RGBColor(104,120,140)
+    buffer=io.BytesIO();doc.save(buffer);buffer.seek(0);return buffer.getvalue()
 
 def generate_cleared_docx_report(
     original_text: str,

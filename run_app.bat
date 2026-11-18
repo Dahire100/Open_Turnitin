@@ -9,3 +9,4 @@ echo Starting backend server and React UI on http://localhost:8000 ...
 start http://localhost:8000
 python server.py
 pause
+

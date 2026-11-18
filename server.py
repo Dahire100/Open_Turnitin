@@ -26,7 +26,7 @@ from engine.humanizer import humanize_text
 from engine.detector import analyze_document_metrics
 from engine.checker import run_comprehensive_check
 from engine.document_parser import extract_text_from_file, create_docx, create_pdf
-from engine.report_generator import generate_turnitin_pdf_report, generate_cleared_docx_report, generate_cleared_pdf_report
+from engine.report_generator import generate_turnitin_pdf_report, generate_similarity_docx_report, generate_cleared_docx_report, generate_cleared_pdf_report
 
 app = FastAPI(title="Turnitout Core Dual-Engine API", version="3.0.0")
 
@@ -82,6 +82,9 @@ def humanize_endpoint(req: HumanizeRequest):
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
         
+    in_words = len(req.text.split())
+    print(f"--> [HUMANIZE] Input: {len(req.text)} chars, {in_words} words", flush=True)
+
     metrics_before = run_comprehensive_check(req.text)
     humanized = humanize_text(
         req.text,
@@ -90,6 +93,9 @@ def humanize_endpoint(req: HumanizeRequest):
         preserve_citations=req.preserve_citations
     )
     metrics_after = run_comprehensive_check(humanized)
+    
+    out_words = len(humanized.split())
+    print(f"<-- [HUMANIZE] Output: {len(humanized)} chars, {out_words} words (Diff: {out_words - in_words})", flush=True)
     
     return {
         "original_text": req.text,
@@ -141,6 +147,20 @@ def download_turnitin_pdf_report(req: ReportRequest):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}"'}
+    )
+
+@app.post("/api/report/similarity-docx")
+def download_similarity_docx_report(req: ReportRequest):
+    """Create an editable local similarity review in Word format."""
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty.")
+    check_data = req.check_result or run_comprehensive_check(req.text)
+    docx_bytes = generate_similarity_docx_report(check_data, req.text, doc_title=req.filename or "Submitted_Document")
+    safe_name = (req.filename or "Similarity_Review").rsplit(".", 1)[0].replace(" ", "_")
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_Similarity_Review.docx"'}
     )
 
 @app.post("/api/report/cleared-pdf")

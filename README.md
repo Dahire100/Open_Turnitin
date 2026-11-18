@@ -75,4 +75,4 @@ bun run build # or npm run build
 
 This project is licensed under the [MIT License](LICENSE) - see the LICENSE file for details.
 
-Developed & Maintained by **Devendra Dahire** ([@Dahire100](https://github.com/Dahire100)).
+Developed & Maintained by **Devendra Ahire** ([@Dahire100](https://github.com/Dahire100)).

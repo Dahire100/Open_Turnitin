@@ -58,6 +58,17 @@ function CircularGauge({ value, color = '#10b981', size = 78, strokeWidth = 7 })
   );
 }
 
+function renderCheckedText(text, segments) {
+  const ranges=[];
+  for(const seg of segments||[]) {
+    if(seg.type==='plagiarism' && Array.isArray(seg.matched_spans)) for(const [start,end] of seg.matched_spans) ranges.push({start,end,type:'plagiarism',color:seg.color||'#cf4a54'});
+    else if(seg.type==='ai') ranges.push({start:seg.start,end:seg.end,type:'ai',color:seg.color||'#a855f7'});
+  }
+  ranges.sort((a,b)=>a.start-b.start); const nodes=[]; let cursor=0;
+  ranges.forEach((range,index)=>{const start=Math.max(cursor,range.start),end=Math.min(text.length,range.end);if(start>cursor)nodes.push(text.slice(cursor,start));if(end>start)nodes.push(<span key={index} className={range.type==='ai'?'highlight-span span-ai':'highlight-span span-plagiarism'} style={{'--match-color':range.color}} title={range.type==='ai'?'Writing-pattern cue; not proof of AI authorship':'Local phrase pattern'}>{text.slice(start,end)}</span>);cursor=Math.max(cursor,end);});
+  if(cursor<text.length)nodes.push(text.slice(cursor)); return nodes;
+}
+
 export default function App() {
   // Navigation active tab: 'home' | 'checker' | 'remover'
   const [activeTab, setActiveTab] = useState('home');
@@ -171,8 +182,8 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Download Turnitin PDF Report
-  const handleDownloadTurnitinPDF = async () => {
+  // Download similarity review PDF
+  const handleDownloadReviewPDF = async () => {
     if (!checkInput.trim()) return;
     try {
       const res = await fetch('/api/report/turnitin-pdf', {
@@ -188,7 +199,7 @@ export default function App() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = (checkFileName ? checkFileName.replace(/\.[^/.]+$/, "") : "Turnitin_Report") + "_Similarity_Audit.pdf";
+      a.download = (checkFileName ? checkFileName.replace(/\.[^/.]+$/, "") : "Similarity_Review") + "_Similarity_Review.pdf";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -223,6 +234,27 @@ export default function App() {
       a.remove();
     } catch (err) {
       alert('Failed to generate Cleared PDF report: ' + err.message);
+    }
+  };
+
+  // Download similarity review as an editable Word document
+  const handleDownloadSimilarityDocx = async () => {
+    if (!checkInput.trim()) return;
+    try {
+      const res = await fetch('/api/report/similarity-docx', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: checkInput, filename: checkFileName || 'Similarity_Review', check_result: checkResult })
+      });
+      if (!res.ok) throw new Error('Word report generation failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (checkFileName ? checkFileName.replace(/\.[^/.]+$/, '') : 'Similarity_Review') + '_Similarity_Review.docx';
+      document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Failed to generate Word review: ' + err.message);
     }
   };
 
@@ -329,12 +361,12 @@ export default function App() {
             className={`nav-btn ${activeTab === 'remover' ? 'active' : ''}`}
             onClick={() => setActiveTab('remover')}
           >
-            <Sparkles size={16} /> Plagiarism Remover
+            <Sparkles size={16} /> Revision assistant
           </button>
         </div>
 
         <div className="nav-status">
-          <CheckCircle2 size={14} /> 100% Free & Unlocked
+          <CheckCircle2 size={14} /> Private local review
         </div>
       </nav>
 
@@ -344,13 +376,13 @@ export default function App() {
           <div className="hero-section">
             <div className="hero-content">
               <div className="hero-pill">
-                <ShieldCheck size={16} /> Turnitin-Grade Deterministic Academic Integrity
+                <ShieldCheck size={16} /> A clearer way to review academic writing
               </div>
               <h1 className="hero-title">
                 Empower Students & Researchers to Do Their Best, Original Work
               </h1>
               <p className="hero-subtitle">
-                The complete academic originality suite: Deep Turnitin-grade similarity detection with highlighted phrase attribution, plus 100% deterministic plagiarism elimination and zero-AI humanization.
+                Review possible text overlap, inspect writing-pattern signals, and revise passages with your own understanding. Turnitout uses a local heuristic scan; it does not connect to Turnitin or certify a paper as original.
               </p>
 
               {/* DUAL CORE OPTIONS */}
@@ -362,20 +394,20 @@ export default function App() {
                       <div className="option-icon-box checker-icon-box">
                         <Search size={26} />
                       </div>
-                      <span className="option-tag tag-red">Checking Engine</span>
+                      <span className="option-tag tag-red">Similarity review</span>
                     </div>
-                    <h3 className="option-title">1. Plagiarism & AI Checker</h3>
+                    <h3 className="option-title">Similarity & writing signals</h3>
                     <p className="option-desc">
-                      Detailed diagnostic scan highlighting overlapping sentences, published sources, and AI-generated segments with authentic Turnitin-style reports.
+                      See potential phrase matches and writing-pattern signals in context, with a color key and review notes inspired by academic similarity reports.
                     </p>
                     <ul className="option-features">
                       <li><Check size={16} color="#ef4444" /> Color-coded highlighted text viewer</li>
-                      <li><Check size={16} color="#ef4444" /> Crossref, PubMed, & Web source matching</li>
-                      <li><Check size={16} color="#ef4444" /> Official Turnitin-Style PDF & Word report</li>
+                      <li><Check size={16} color="#ef4444" /> Local phrase-pattern review</li>
+                      <li><Check size={16} color="#ef4444" /> Export a review summary for your own records</li>
                     </ul>
                   </div>
                   <button className="cta-btn cta-checker">
-                    Launch Similarity Checker <ArrowRight size={18} />
+                    Open review workspace <ArrowRight size={18} />
                   </button>
                 </div>
 
@@ -386,20 +418,20 @@ export default function App() {
                       <div className="option-icon-box remover-icon-box">
                         <Sparkles size={26} />
                       </div>
-                      <span className="option-tag tag-green">Removal Engine</span>
+                      <span className="option-tag tag-green">Revision workspace</span>
                     </div>
-                    <h3 className="option-title">2. Plagiarism Remover & Humanizer</h3>
+                    <h3 className="option-title">Originality revision workspace</h3>
                     <p className="option-desc">
-                      Completely eliminates plagiarism down to 0% and removes AI detection to 0% with mathematical 4-gram shattering and natural academic phrasing.
+                      Rework passages using your own analysis, cite source material, and compare a revised draft side by side. No tool can guarantee a particular similarity or AI score.
                     </p>
                     <ul className="option-features">
-                      <li><Check size={16} color="#16a34a" /> 100% Guaranteed 0% Plagiarism Evasion</li>
-                      <li><Check size={16} color="#16a34a" /> 0% AI Detection across GPTZero & Turnitin</li>
-                      <li><Check size={16} color="#16a34a" /> Citations & chemical terms 100% immune</li>
+                      <li><Check size={16} color="#16a34a" /> Revise ideas in your own words and cite sources</li>
+                      <li><Check size={16} color="#16a34a" /> AI indicators are uncertain and need human review</li>
+                      <li><Check size={16} color="#16a34a" /> Keep citations and technical terms in view</li>
                     </ul>
                   </div>
                   <button className="cta-btn cta-remover">
-                    Launch 100% Remover <ArrowRight size={18} />
+                    Open revision workspace <ArrowRight size={18} />
                   </button>
                 </div>
               </div>
@@ -411,7 +443,7 @@ export default function App() {
             <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '12px', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <h4 style={{ fontSize: '1.1rem', color: '#0369a1', fontWeight: 700, marginBottom: '0.25rem' }}>Supported File Formats</h4>
-                <p style={{ color: '#0284c7', fontSize: '0.9rem' }}>Upload directly: Word (.docx), PDF (.pdf), LaTeX (.tex), and Text (.txt)</p>
+                <p style={{ color: '#0284c7', fontSize: '0.9rem' }}>Add a document or paste text. Supported: Word, PDF, LaTeX, and plain text.</p>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
                 <label className="btn-primary" style={{ cursor: 'pointer' }}>
@@ -425,6 +457,8 @@ export default function App() {
               </div>
             </div>
           </div>
+          <section className="workflow-section"><div className="section-eyebrow">A transparent workflow</div><h2 className="section-title">From first scan to a stronger draft</h2><p className="section-copy">Review the context of each match, check the cited source, then decide what needs a quotation, citation, or fresh explanation.</p><div className="steps-grid"><article className="step-card"><div className="step-num">01</div><h3>Bring in your draft</h3><p>Paste or upload text. The local scan looks for recurring phrases and writing-pattern cues.</p></article><article className="step-card"><div className="step-num">02</div><h3>Inspect each highlight</h3><p>Compare potential overlaps with your source and check that attribution is clear.</p></article><article className="step-card"><div className="step-num">03</div><h3>Revise with understanding</h3><p>Explain ideas using your own reasoning, quote distinctive wording, and preserve attribution.</p></article></div><div className="report-preview"><div className="preview-topbar"><span>Similarity report · illustrative view</span><span>Match overview &nbsp;›</span></div><div className="preview-body"><div className="preview-paper">A careful review begins by comparing the <span className="mark-red">key wording in a passage with the source</span> and checking whether the idea has been attributed. Researchers can then <span className="mark-amber">explain the evidence in the context of their own findings</span>, while retaining any required quotation. <span className="mark-blue">A clear citation lets readers trace the original work</span>.<p className="legend-note">Illustrative interface preview only. This app uses local phrase heuristics rather than Turnitin’s source collections.</p></div><aside className="preview-sidebar"><h4>Potential matches</h4><div className="preview-source"><span className="source-label"><i className="source-swatch" style={{background:'#cf6970'}}/>Match group 1</span><b>12%</b></div><div className="preview-source"><span className="source-label"><i className="source-swatch" style={{background:'#d3a34b'}}/>Match group 2</span><b>7%</b></div><div className="preview-source"><span className="source-label"><i className="source-swatch" style={{background:'#6696ce'}}/>Match group 3</span><b>4%</b></div><p className="legend-note">A match percentage prompts review; it is not a plagiarism finding.</p></aside></div></div></section>
+          <section className="workflow-section"><div className="section-eyebrow">Revision, with context</div><h2 className="section-title">How the revision workspace helps</h2><p className="section-copy">Compare a passage and its revision, then check meaning, your own reasoning, and source attribution before exporting.</p><div className="steps-grid"><article className="step-card"><div className="step-num">A</div><h3>Understand the source</h3><p>Identify the idea you need to support instead of swapping words sentence by sentence.</p></article><article className="step-card"><div className="step-num">B</div><h3>Write your explanation</h3><p>Connect the evidence to your own claim, methods, or findings; quote exact wording when needed.</p></article><article className="step-card"><div className="step-num">C</div><h3>Verify and cite</h3><p>Review accuracy and attribution. No rewriting tool can promise a zero score or bypass an authorship detector.</p></article></div></section>
         </div>
       )}
 
@@ -433,8 +467,8 @@ export default function App() {
         <div className="main-wrapper">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#002f6c' }}>Similarity & AI Originality Checker</h2>
-              <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Diagnose exact plagiarism matches and AI patterns with sentence-level visual highlights.</p>
+              <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#002f6c' }}>Similarity review</h2>
+              <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Review phrase-pattern matches and writing cues sentence by sentence. Similarity is not a plagiarism verdict; AI signals are not proof of authorship.</p>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button className="btn-outline" onClick={loadAcademicSample}>
@@ -456,7 +490,7 @@ export default function App() {
                 </div>
                 <div>
                   <div className="score-label">Similarity Index</div>
-                  <div className="score-sub">{checkResult.overall_similarity > 20 ? 'Plagiarism Detected' : 'Original Content'}</div>
+                  <div className="score-sub">{checkResult.overall_similarity > 20 ? 'Potential overlap to review' : 'No local pattern flagged'}</div>
                 </div>
               </div>
 
@@ -465,8 +499,8 @@ export default function App() {
                   {checkResult.overall_ai_score}%
                 </div>
                 <div>
-                  <div className="score-label">AI Detection Score</div>
-                  <div className="score-sub">{checkResult.overall_ai_score > 25 ? 'AI Patterns Found' : 'Human Written'}</div>
+                  <div className="score-label">Writing-pattern signals</div>
+                  <div className="score-sub">{checkResult.overall_ai_score > 25 ? 'Review cues present' : 'Few review cues'}</div>
                 </div>
               </div>
 
@@ -501,10 +535,10 @@ export default function App() {
                   {checkResult && (
                     <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.8rem', fontWeight: 600 }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#b91c1c' }}>
-                        <span style={{ width: 10, height: 10, background: '#ef4444', borderRadius: '50%' }}></span> Plagiarism
+                        <span style={{ width: 10, height: 10, background: '#ef4444', borderRadius: '50%' }}></span> Potential overlap
                       </span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#7e22ce' }}>
-                        <span style={{ width: 10, height: 10, background: '#a855f7', borderRadius: '50%' }}></span> AI Content
+                        <span style={{ width: 10, height: 10, background: '#a855f7', borderRadius: '50%' }}></span> Writing-pattern cue
                       </span>
                     </div>
                   )}
@@ -520,51 +554,34 @@ export default function App() {
                 <div>
                   <textarea
                     className="textarea-box"
-                    placeholder="Paste your essay, thesis, or research paper text here to scan for similarity and AI detection..."
+                    placeholder="Paste a passage to review for recurring phrases and writing-pattern cues..."
                     value={checkInput}
                     onChange={(e) => setCheckInput(e.target.value)}
                   />
                   <div className="action-bar">
                     <button className="btn-primary" style={{ padding: '0.85rem 1.75rem', fontSize: '1rem' }} onClick={handleRunCheck} disabled={isChecking}>
-                      {isChecking ? <><RefreshCw className="animate-spin" size={18} /> Scanning Against Databases...</> : <><Search size={18} /> Run Similarity & AI Scan</>}
+                      {isChecking ? <><RefreshCw className="animate-spin" size={18} /> Reviewing local patterns...</> : <><Search size={18} /> Run local review</>}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div>
                   <div className="highlight-viewer-box">
-                    {checkResult.highlighted_segments.map((seg) => {
-                      if (seg.type === 'plagiarism') {
-                        return (
-                          <span key={seg.id} className="highlight-span span-plagiarism" title={`Matched: ${seg.source_name} (${seg.similarity_score}%)`}>
-                            <span className="badge-tag badge-plag">[{seg.id}]</span>
-                            {seg.text}{' '}
-                          </span>
-                        );
-                      } else if (seg.type === 'ai') {
-                        return (
-                          <span key={seg.id} className="highlight-span span-ai" title={`AI Marker: ${seg.reasons?.join(', ')}`}>
-                            <span className="badge-tag badge-ai">[AI]</span>
-                            {seg.text}{' '}
-                          </span>
-                        );
-                      }
-                      return <span key={seg.id} className="highlight-span span-clean">{seg.text} </span>;
-                    })}
+                    {renderCheckedText(checkInput, checkResult.highlighted_segments)}
                   </div>
 
                   {/* Actions for Checked Text */}
                   <div className="action-bar" style={{ justifyContent: 'space-between', marginTop: '1.25rem' }}>
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
-                      <button className="btn-outline" onClick={handleDownloadTurnitinPDF}>
-                        <Download size={16} /> Download Turnitin PDF Report
+                      <button className="btn-outline" onClick={handleDownloadReviewPDF}>
+                        <Download size={16} /> Download similarity review PDF
                       </button>
-                      <button className="btn-outline" onClick={handleDownloadWordReport}>
-                        <Download size={16} /> Download Word Report
+                      <button className="btn-outline" onClick={handleDownloadSimilarityDocx}>
+                        <Download size={16} /> Download Word review
                       </button>
                     </div>
                     <button className="btn-success" onClick={handleSendToRemover} style={{ fontWeight: 700 }}>
-                      <Sparkles size={18} /> ⚡ Fix All Issues in Remover (0% Plagiarism)
+                      <Sparkles size={18} /> ⚡ Review passages in revision workspace
                     </button>
                   </div>
                 </div>
@@ -574,9 +591,9 @@ export default function App() {
             {/* Right Sidebar: Sources Breakdown */}
             <div className="sources-card">
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#002f6c', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Layers size={18} /> Primary Matched Sources
+                <Layers size={18} /> Potential pattern groups
               </h3>
-              <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.25rem' }}>Ranked by percentage similarity to existing academic repositories.</p>
+              <p style={{ color: '#64748b', fontSize: '0.8rem', marginTop: '0.25rem' }}>Local phrase patterns only. No external database lookup is performed.</p>
 
               {checkResult && checkResult.matched_sources?.length > 0 ? (
                 <div className="sources-list">
@@ -585,8 +602,8 @@ export default function App() {
                       <div className="source-left">
                         <div className="source-rank" style={{ background: src.color || '#ef4444' }}>{i + 1}</div>
                         <div>
-                          <div className="source-name" title={src.name}>{src.name}</div>
-                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{src.category}</div>
+                          <div className="source-name" title="Local phrase heuristic">Local phrase pattern {i + 1}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Local heuristic</div>
                         </div>
                       </div>
                       <div className="source-pct">{src.percentage}%</div>
@@ -596,8 +613,8 @@ export default function App() {
               ) : (
                 <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#16a34a', fontSize: '0.9rem' }}>
                   <CheckCircle2 size={36} color="#16a34a" style={{ margin: '0 auto 0.5rem' }} />
-                  <b>No overlapping sources detected!</b>
-                  <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.25rem' }}>Text is 100% original and verified.</p>
+                  <b>No local phrase patterns flagged</b>
+                  <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.25rem' }}>This is not a guarantee of originality. Review sources and citations.</p>
                 </div>
               )}
             </div>
@@ -610,8 +627,8 @@ export default function App() {
         <div className="main-wrapper">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#002f6c' }}>100% Plagiarism Remover & Zero-AI Engine</h2>
-              <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Deterministic mathematical 4-gram shattering with 100% citation and chemical term preservation.</p>
+              <h2 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#002f6c' }}>Originality revision workspace</h2>
+              <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Use the review cues as a starting point: understand the source, write your own explanation, and keep accurate citations.</p>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button className="btn-outline" onClick={loadAcademicSample}>
@@ -635,13 +652,13 @@ export default function App() {
             });
 
             const plagScore = currentMetrics.overall_similarity || 0;
-            const exactMatchScore = Math.round(plagScore * 0.6);
-            const partialMatchScore = Math.round(plagScore * 0.4);
+            const exactMatchScore = plagScore;
+            const partialMatchScore = currentMetrics.overall_ai_score || 0;
             const uniqueScore = Math.max(0, 100 - plagScore);
 
             return (
               <div className="modern-scorecard-grid">
-                {/* Card 1: Plagiarized / Similarity Meter */}
+                {/* Card 1: Similarity estimate / Similarity Meter */}
                 <div className="modern-gauge-card">
                   <div className="gauge-left-cluster">
                     <CircularGauge 
@@ -649,12 +666,12 @@ export default function App() {
                       color={plagScore > 20 ? '#ef4444' : (plagScore > 0 ? '#f59e0b' : '#cbd5e1')} 
                     />
                     <div className="gauge-title-box">
-                      <span className="gauge-main-title">Plagiarized</span>
+                      <span className="gauge-main-title">Similarity estimate</span>
                       <span className="gauge-subtitle">
                         {metricsAfter ? (
-                          <span style={{ color: '#16a34a', fontWeight: 700 }}>✓ 0.0% Cleared (Turnitin)</span>
+                          <span style={{ color: '#16a34a', fontWeight: 700 }}>Revision processed</span>
                         ) : (
-                          metricsBefore ? `Flagged: ${metricsBefore.overall_similarity}%` : 'Turnitin & Database Index'
+                          metricsBefore ? `Flagged: ${metricsBefore.overall_similarity}%` : 'Local phrase-pattern estimate'
                         )}
                       </span>
                     </div>
@@ -665,7 +682,7 @@ export default function App() {
                     <div className="breakdown-row">
                       <div className="breakdown-meta">
                         <span className="breakdown-label">
-                          <span className="breakdown-dot dot-red"></span> Exact Match
+                          <span className="breakdown-dot dot-red"></span> Local phrase patterns
                         </span>
                         <span className="breakdown-value">{exactMatchScore}%</span>
                       </div>
@@ -680,7 +697,7 @@ export default function App() {
                     <div className="breakdown-row">
                       <div className="breakdown-meta">
                         <span className="breakdown-label">
-                          <span className="breakdown-dot dot-yellow"></span> Partial Match
+                          <span className="breakdown-dot dot-yellow"></span> Writing-pattern cues
                         </span>
                         <span className="breakdown-value">{partialMatchScore}%</span>
                       </div>
@@ -694,7 +711,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Card 2: Unique / Original Content Meter */}
+                {/* Card 2: Unique / No local pattern flagged Meter */}
                 <div className="modern-gauge-card">
                   <div className="gauge-left-cluster">
                     <CircularGauge 
@@ -702,8 +719,8 @@ export default function App() {
                       color="#10b981" 
                     />
                     <div className="gauge-title-box">
-                      <span className="gauge-main-title">{uniqueScore}% Unique</span>
-                      <span className="gauge-subtitle">Original Content</span>
+                      <span className="gauge-main-title">{uniqueScore}% without local phrase flags</span>
+                      <span className="gauge-subtitle">No local pattern flagged</span>
                     </div>
                   </div>
 
@@ -720,7 +737,7 @@ export default function App() {
                       alignItems: 'center',
                       gap: '5px'
                     }}>
-                      <Check size={13} /> {metricsAfter ? '100% Cleared & Humanized' : 'Deterministic Zero-AI'}
+                      <Check size={13} /> {metricsAfter ? 'Revision ready to review' : 'Local heuristic snapshot'}
                     </span>
                     <span style={{ 
                       background: '#f0fdf4', 
@@ -734,7 +751,7 @@ export default function App() {
                       alignItems: 'center',
                       gap: '4px'
                     }}>
-                      <ShieldCheck size={12} /> Zero 4-Gram Overlap
+                      <ShieldCheck size={12} /> Heuristic output only
                     </span>
                   </div>
                 </div>
@@ -746,7 +763,7 @@ export default function App() {
           <div className="modern-pill-toolbar">
             <div className="pill-group-left">
               <button className="nav-pill-btn active-blue">
-                <Sparkles size={15} /> Plagiarism Remover
+                <Sparkles size={15} /> Revision assistant
               </button>
               <button 
                 className="nav-pill-btn" 
@@ -782,7 +799,7 @@ export default function App() {
                 disabled={isRemoving}
                 style={{ padding: '0.6rem 1.4rem', borderRadius: '999px', fontSize: '0.9rem', fontWeight: 700 }}
               >
-                {isRemoving ? <><RefreshCw className="animate-spin" size={15} /> Eliminating Plagiarism...</> : <><Sparkles size={15} /> Eliminate Plagiarism & Humanize</>}
+                {isRemoving ? <><RefreshCw className="animate-spin" size={15} /> Preparing revision...</> : <><Sparkles size={15} /> Revise draft with your own analysis</>}
               </button>
             </div>
           </div>
@@ -792,7 +809,7 @@ export default function App() {
             {/* Input Pane */}
             <div className="pane-card">
               <div className="card-title-bar">
-                <h2><FileText size={18} /> Original Input (Flagged)</h2>
+                <h2><FileText size={18} /> Draft to review</h2>
                 {removerInput && (
                   <button className="btn-outline" style={{ padding: '0.3rem 0.6rem' }} onClick={() => setRemoverInput('')}>
                     <Trash2 size={14} /> Clear
@@ -801,7 +818,7 @@ export default function App() {
               </div>
               <textarea
                 className="textarea-box"
-                placeholder="Paste plagiarized text or academic paper to clean..."
+                placeholder="Paste a passage you want to review and revise..."
                 value={removerInput}
                 onChange={(e) => setRemoverInput(e.target.value)}
               />
@@ -813,7 +830,7 @@ export default function App() {
             {/* Output Pane */}
             <div className="pane-card">
               <div className="card-title-bar">
-                <h2 style={{ color: '#16a34a' }}><FileCheck size={18} /> Humanized Output (0% Plagiarism & 0% AI)</h2>
+                <h2 style={{ color: '#16a34a' }}><FileCheck size={18} /> Revised draft</h2>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button className="btn-outline" onClick={handleCopy} disabled={!removerOutput}>
                     {copied ? <Check size={14} color="#16a34a" /> : <Copy size={14} />} {copied ? 'Copied!' : 'Copy'}
@@ -822,14 +839,14 @@ export default function App() {
               </div>
               <textarea
                 className="textarea-box"
-                placeholder="Cleaned, humanized output with 0% plagiarism will appear here..."
+                placeholder="Your revision will appear here for review. Check meaning and citations before use."
                 value={removerOutput}
                 onChange={(e) => setRemoverOutput(e.target.value)}
                 style={{ background: '#f8fafc', borderColor: removerOutput ? '#86efac' : '#cbd5e1' }}
               />
               <div className="action-bar" style={{ justifyContent: 'space-between' }}>
                 <div style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600 }}>
-                  {removerOutput && '✓ Zero 4-gram overlap verified & AI evasion guaranteed'}
+                  {removerOutput && 'Review the revised wording and verify every source citation.'}
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                   <button className="btn-outline" onClick={() => handleExport('docx')} disabled={!removerOutput} title="Download cleaned manuscript in Word format">
@@ -841,11 +858,11 @@ export default function App() {
                   <button className="btn-outline" onClick={() => handleExport('txt')} disabled={!removerOutput} title="Download cleaned plain text">
                     <Download size={14} /> .txt
                   </button>
-                  <button className="btn-primary" onClick={handleDownloadClearedPdfReport} disabled={!removerOutput} title="Download official Turnitin-style 100% Cleared PDF Certificate">
-                    <FileCheck size={14} /> Cleared Report (PDF)
+                  <button className="btn-primary" onClick={handleDownloadClearedPdfReport} disabled={!removerOutput} title="Download revision summary PDF">
+                    <FileCheck size={14} /> Revision summary (PDF)
                   </button>
-                  <button className="btn-outline" onClick={handleDownloadWordReport} disabled={!removerOutput} title="Download official Cleared Report in Word (.docx) format">
-                    <FileText size={14} /> Report (.docx)
+                  <button className="btn-outline" onClick={handleDownloadWordReport} disabled={!removerOutput} title="Download revision summary in Word format">
+                    <FileText size={14} /> Revision details (.docx)
                   </button>
                 </div>
               </div>
@@ -855,16 +872,7 @@ export default function App() {
       )}
 
       {/* Footer */}
-      <footer className="app-footer">
-        <p className="footer-attribution">Open Turnitin &bull; AI Plagiarism & Footprint Removal Engine</p>
-        <p>
-          🔍 <b>Verify AI Content:</b> Paste your paragraph on{' '}
-          <a href="https://quillbot.com/ai-content-detector" target="_blank" rel="noreferrer" className="footer-link">
-            QuillBot AI Content Detector <ExternalLink size={12} style={{ display: 'inline' }} />
-          </a>{' '}
-          or Turnitin to confirm 0% plagiarism and zero AI detection.
-        </p>
-      </footer>
+      <footer className="app-footer"><p className="footer-attribution">Turnitout • Created by Devendra Ahire • Academic writing review</p><p>Similarity results identify possible text overlap, not plagiarism. AI writing indicators are heuristic and cannot determine authorship. Review the original sources and your institution’s guidance.</p></footer>
     </div>
   );
 }

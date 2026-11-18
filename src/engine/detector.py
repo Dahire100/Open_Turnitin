@@ -131,15 +131,21 @@ def analyze_document_metrics(text: str) -> Dict[str, Any]:
     if burstiness < 0.35:
         ai_penalty += (0.35 - burstiness) * 100.0
     # Cliché impact: each cliché adds ~10-15% risk
-    ai_penalty += min(45.0, cliche_count * 12.0)
+    ai_penalty += min(50.0, cliche_count * 14.0)
     # Average sentence length uniformness (AI usually averages 16-24 words per sentence)
     avg_len = word_count / sentence_count
-    if 15 <= avg_len <= 25 and burstiness < 0.4:
+    if 15 <= avg_len <= 25 and burstiness < 0.38:
         ai_penalty += 15.0
         
-    base_ai = 20.0 + ai_penalty
-    if burstiness > 0.7 and cliche_count == 0:
-        base_ai = max(2.0, base_ai - 30.0)
+    if cliche_count == 0:
+        if burstiness >= 0.55:
+            base_ai = 0.0
+        elif burstiness >= 0.40:
+            base_ai = max(0.0, (0.55 - burstiness) * 40.0)
+        else:
+            base_ai = 15.0 + ai_penalty
+    else:
+        base_ai = 20.0 + ai_penalty
         
     ai_score = round(max(0.0, min(99.0, base_ai)), 1)
     plagiarism_score = round(max(0.0, min(99.0, plagiarism_score)), 1)
